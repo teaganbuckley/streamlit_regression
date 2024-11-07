@@ -1,4 +1,7 @@
 import streamlit as st
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns
 from model_training import load_data, prepare_data, train_model  # Import your functions
@@ -15,34 +18,77 @@ def plot_scatter(X, y, predictor):
 # Streamlit UI
 st.title('Key Events Impact Analysis Tool')
 
-# Use a unique key for the file uploader
-uploaded_file = st.file_uploader("Upload your GA4 data", type='csv', key='ga4_data_uploader')
+# Tool description
+st.write("This interactive tool empowers you to analyze the impact of various website metrics on key event outcomes. By utilizing historical data, you can explore the relationships between significant variables such as user engagement and sessions, and how changes to these metrics can influence your overall performance.")
 
-if uploaded_file is not None:
-    # Load data
-    data = load_data(uploaded_file)
-    X, y = prepare_data(data)
+# Data Preparation section
+st.header("Data Preparation")
+with st.expander("Upload Your Data", icon=":material/upload:"):
+    # File uploader
+    uploaded_file = st.file_uploader("Upload your GA4 data", type='csv', key='ga4_data_uploader')
+
+    if uploaded_file is not None:
+        # Load data
+        data = load_data(uploaded_file)
+        X, y = prepare_data(data)
+        
+        # Train the model
+        model, X_test, y_test = train_model(X, y)
+
+# Data Insights section
+st.header("Data Insights")
+with st.expander("Coefficients", icon=":material/info:"):
+    coefficients = dict(zip(X.columns, model.coef_))
+    formatted_coefficients = {k: f"{v:.2f}" for k, v in coefficients.items()}
+    st.write(formatted_coefficients)
+
+with st.expander("Scatter Plots", icon=":material/analytics:"):
+    for predictor in X.columns:
+        plot_scatter(X, y, predictor)
+
+with st.expander("Insights", icon=":material/insights:"):
+    strongest_positive = max(coefficients, key=coefficients.get)
+    strongest_negative = min(coefficients, key=coefficients.get)
+    st.write(f"From this data, we can see that the '{strongest_positive}' variable has the strongest positive correlation with Key Events.")
+    st.write(f"Conversely, the '{strongest_negative}' variable has the strongest negative correlation with Key Events.")
+
+# Data Prediction section
+st.header("Data Prediction")
+with st.expander("Impact Calculator", icon=":material/calculate:"):
+    st.write("Predict how changes in your key GA4 metrics will impact your key events.")
     
-    # Train the model
-    model, X_test, y_test = train_model(X, y)
+    # User input for the calculator
+    selected_variable = st.selectbox("Select the metric you'd like to evaluate.", options=X.columns)
+    daily_change = st.number_input("What is the daily change you want to simulate (positive or negative)?", value=0.0, format="%.2f")
+
+    period = st.radio("Select the period to model", ["Week", "Month", "Quarter"])
     
-    # Data Insights section
-    st.subheader("Data Insights")
+    if st.button("Calculate Impact"):
+        # Determine change based on selected period
+        if period == "Week":
+            total_change = daily_change * 7
+        elif period == "Month":
+            total_change = daily_change * 30
+        elif period == "Quarter":
+            total_change = daily_change * 90
 
-    # Coefficients section
-    with st.expander("Coefficients", icon=":material/info:"):
-        coefficients = dict(zip(X.columns, model.coef_))
-        formatted_coefficients = {k: f"{v:.2f}" for k, v in coefficients.items()}
-        st.write(formatted_coefficients)
+        # Calculate predicted impact
+        current_values = X.mean()  # Average current values
+        current_x_value = current_values[selected_variable]
+        new_x_value = current_x_value + total_change
+        input_data = pd.DataFrame({col: [current_values[col]] for col in X.columns})
+        input_data[selected_variable] = new_x_value
+        predicted_y = model.predict(input_data)[0]
 
-    # Scatter plots section
-    with st.expander("Scatter Plots", icon=":material/analytics:"):
-        for predictor in X.columns:
-            plot_scatter(X, y, predictor)
+        # Calculate the change in key events
+        original_predicted_y = model.predict([current_values])[0]
+        change_in_events = predicted_y - original_predicted_y
 
-    # Insights section
-    with st.expander("Insights", icon=":material/insights:"):
-        strongest_positive = max(coefficients, key=coefficients.get)
-        strongest_negative = min(coefficients, key=coefficients.get)
-        st.write(f"From this data, we can see that the '{strongest_positive}' variable has the strongest positive correlation with Key Events. This means that this is most likely to drive more Key Events to the site.")
-        st.write(f"Conversely, the '{strongest_negative}' variable has the strongest negative correlation with Key Events, indicating that increases in this metric might lead to a decrease in Key Events.")
+        # Construct the result message
+        if change_in_events > 0:
+            result_message = f"Over a {period}, changing your {selected_variable} by {daily_change} a day is predicted to drive an additional {change_in_events:.2f} key events."
+        else:
+            result_message = f"Over a {period}, changing your {selected_variable} by {daily_change} a day is predicted to cause {abs(change_in_events):.2f} fewer key events to happen on site."
+
+        # Display the result message
+        st.write(result_message)
